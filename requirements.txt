@@ -1,0 +1,2 @@
+moviepy==2.2.1
+pillow==11.3.0

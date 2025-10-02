@@ -1,0 +1,52 @@
+name: Publish Release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  build-windows:
+    name: Build windows executable
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - name: Build executable
+      shell: cmd
+      run: |
+        pip install -r requirements.txt
+        pip install pyinstaller
+        pyinstaller -F mpo_to_gif.py
+    - name: Upload windows build
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows_build
+        path: dist/mpo_to_gif.exe
+  create-release:
+    name: Create release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Find tag message
+      run: |
+        echo "tag_body<<EOF" >> $GITHUB_ENV
+        git tag -l "${{ github.ref_name }}" --format='%(contents:body)' >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+    - name: Download windows build
+      uses: actions/download-artifact@v5
+      with:
+        name: windows_build
+    - name: Rename files
+      run: |
+        mv mpo_to_gif.exe mpo_to_gif_windows_x64_${{ github.ref_name }}.exe
+    - name: Create a Release
+      uses: softprops/action-gh-release@v2
+      with:
+        body: ${{ env.tag_body }}
+        files: |
+          mpo_to_gif_windows_x64_${{ github.ref_name }}.exe

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpo_to_gif"
+version = "0.1.0" # Remember to change VERSION in mpo_to_gif.py as well
+authors = [{name="Marcus Rinzsch"}]
+description = "Batch editing of all your amazing Nintendo 3DS images"
+readme = "README.md"
+dynamic = ["dependencies"]
+requires-python = ">=3.9"
+
+[project.scripts]
+mpo-to-gif = "mpo_to_gif:main"
+
+[project.urls]
+"Homepage" = "https://github.com/MarcusRinzsch/Nintendo-3DS-MPO-to-GIF"
+"Bug Tracker" = "https://github.com/MarcusRinzsch/Nintendo-3DS-MPO-to-GIF/issues"
+
+[tool.setuptools]
+py-modules = ["mpo_to_gif"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
