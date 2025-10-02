@@ -99,10 +99,10 @@ def launch_splash() -> tuple[Path, Path] | None:
 def create_slider(
     label_text: str,
     slider_range: tuple[float, float],
+    variable: tk.IntVar,
     grid_frame: tk.Frame,
     grid_coordinates: tuple[int, int],
-    command: Callable[[int], None] | tuple[Callable[[str, int], None], str],
-    initial: float
+    command: Callable[[], None],
 ) -> tk.Scale:
     frame = tk.Frame(grid_frame, bg=COLORS["bg_controls"])
     frame.grid(row=grid_coordinates[0], column=grid_coordinates[1], padx=10, pady=5, sticky="w")
@@ -117,20 +117,9 @@ def create_slider(
     slider_row.pack()
 
     # Live value label to the left of slider
-    value_label = ttk.Label(slider_row, text=str(initial), width=5)
+    value_label = ttk.Label(slider_row, textvariable=variable, width=5)
     value_label.configure(background=COLORS["bg_controls"], foreground=COLORS["fg_value"])
     value_label.pack(side="left")
-
-    if isinstance(command, Callable):
-        def slider_command(val: str) -> None:
-            value = int(val)
-            value_label.config(text=str(value))
-            command(value)
-    else:
-        def slider_command(val: str) -> None:
-            value = int(val)
-            value_label.config(text=str(value))
-            command[0](command[1], value)
 
     # Slider
     scale = tk.Scale(
@@ -148,9 +137,9 @@ def create_slider(
         fg=COLORS["fg_value"],
         activebackground=COLORS["bg_slider_knob"],
         highlightbackground=COLORS["bg_controls"],
-        command=slider_command
+        command=lambda v: command(),
+        variable=variable,
     )
-    scale.set(initial)
     scale.pack(side="left")
     return scale
 
@@ -178,10 +167,7 @@ class App:
         # === State tracking
         self._current_index = 0
         self._current_file_name = ""
-        self._overlap = 0
-        self._frame_duration = 175
         self._preview_interval = 0.05
-        self._crop = {"l": 0, "t": 0, "r": 0, "b": 0}
         self._toggle = True
         self._left_img: Image.Image | None = None
         self._right_img: Image.Image | None = None
@@ -201,7 +187,15 @@ class App:
         self._canvas.pack()
 
         self._window.bind("<Key>", self._handle_key)
-            
+
+        # Control variables
+        self._overlap = tk.IntVar(self._window, 0)
+        self._crop_left = tk.IntVar(self._window, 0)
+        self._crop_top = tk.IntVar(self._window, 0)
+        self._crop_right = tk.IntVar(self._window, 0)
+        self._crop_bottom = tk.IntVar(self._window, 0)
+        self._frame_duration = tk.IntVar(self._window, 175)
+
         # === APPLY COLORS TO WINDOW AND WIDGETS ===
         self._window.configure(bg=COLORS["bg_main"])
         self._canvas.configure(bg=COLORS["bg_canvas"], highlightthickness=0)
@@ -227,50 +221,50 @@ class App:
         self._overlap_slider = create_slider(
             "Overlap",
             (-100, 100),
+            self._overlap,
             grid,
             (0, 0),
-            self._update_overlap,
-            self._overlap
+            self._process_images,
         )
         self._crop_left_slider = create_slider(
             "Crop Left",
             (0, 200),
+            self._crop_left,
             grid,
             (0, 1),
-            (self._update_crop, "l"),
-            self._crop["l"],
+            self._process_images,
         )
         self._crop_top_slider = create_slider(
             "Crop Top",
             (0, 200),
+            self._crop_top,
             grid,
             (1, 0),
-            (self._update_crop, "t"),
-            self._crop["t"]
+            self._process_images,
         )
         self._crop_right_slider = create_slider(
             "Crop Right",
             (0, 200),
+            self._crop_right,
             grid,
             (1, 1),
-            (self._update_crop, "r"),
-            self._crop["r"]
+            self._process_images,
         )
         self._crop_bottom_slider = create_slider(
             "Crop Bottom",
             (0, 200),
+            self._crop_bottom,
             grid,
             (2, 0),
-            (self._update_crop, "b"),
-            self._crop["b"]
+            self._process_images,
         )
         self._duration_slider = create_slider(
             "Frame Duration (ms)",
             (50, 1000),
+            self._frame_duration,
             grid,
             (2, 1),
             self._update_duration,
-            self._frame_duration,
         )
 
         # === BUTTONS ===
@@ -296,18 +290,13 @@ class App:
         self._window.mainloop()
 
     def _reset_defaults(self) -> None:
-        self._overlap = 0
-        self._frame_duration = 175
-        self._preview_interval = self._frame_duration / 1000.0
-        self._crop = {"l": 0, "t": 0, "r": 0, "b": 0}
-
-        # Reset sliders visually
-        self._overlap_slider.set(self._overlap)
-        self._crop_left_slider.set(self._crop["l"])
-        self._crop_top_slider.set(self._crop["t"])
-        self._crop_right_slider.set(self._crop["r"])
-        self._crop_bottom_slider.set(self._crop["b"])
-        self._duration_slider.set(self._frame_duration)
+        self._overlap.set(0)
+        self._crop_left.set(0)
+        self._crop_top.set(0)
+        self._crop_right.set(0)
+        self._crop_bottom.set(0)
+        self._frame_duration.set(175)
+        self._preview_interval = self._frame_duration.get() / 1000.0
 
     def _handle_key(self, event: tk.Event) -> None:
         key = event.keysym.lower()
@@ -318,15 +307,16 @@ class App:
         elif key.startswith("kp_") or key.isdigit():
             self._skip_entry.focus_set()
 
-    def _process_images(self) -> tuple[Image.Image, Image.Image]:
+    def _process_images(self) -> None:
         mpo = Image.open(self._mpo_files[self._current_index])
         frames = [frame.copy() for frame in ImageSequence.Iterator(mpo)]
         if len(frames) < 2:
             raise ValueError("MPO file must contain at least two frames.")
 
         width, height = frames[0].size
-        left_start = -self._overlap
-        right_start = self._overlap
+        overlap = self._overlap.get()
+        left_start = -overlap
+        right_start = overlap
 
         left_box = (left_start, 0, width + left_start, height)
         right_box = (right_start, 0, width + right_start, height)
@@ -334,14 +324,15 @@ class App:
         left_image = frames[0].crop(left_box)
         right_image = frames[1].crop(right_box)
 
-        crop_l, crop_t, crop_r, crop_b = self._crop["l"], self._crop["t"], self._crop["r"], self._crop["b"]
+        crop_l= self._crop_left.get()
+        crop_t = self._crop_top.get()
+        crop_r = self._crop_right.get()
+        crop_b = self._crop_bottom.get()
         new_width = left_image.width - crop_l - crop_r
         new_height = left_image.height - crop_t - crop_b
 
-        left_image = left_image.crop((crop_l, crop_t, crop_l + new_width, crop_t + new_height))
-        right_image = right_image.crop((crop_l, crop_t, crop_l + new_width, crop_t + new_height))
-
-        return left_image, right_image
+        self._left_img = left_image.crop((crop_l, crop_t, crop_l + new_width, crop_t + new_height))
+        self._right_img = right_image.crop((crop_l, crop_t, crop_l + new_width, crop_t + new_height))
 
     def _update_preview(self) -> None:
         assert self._left_img is not None and self._right_img is not None
@@ -364,24 +355,16 @@ class App:
         mpo_path = self._mpo_files[index]
         self._current_file_name = mpo_path.stem  # ← use original filename
 
-        self._left_img, self._right_img = self._process_images()
+        self._process_images()
+        assert self._left_img is not None
         self._canvas.config(width=self._left_img.width, height=self._left_img.height)
         self._status_label.config(text=f"Editing {mpo_path.name}")
 
         return True
 
     # === CONTROL ACTIONS ===
-    def _update_overlap(self, val: int) -> None:
-        self._overlap = val
-        self._left_img, self._right_img = self._process_images()
-
-    def _update_crop(self, side: str, val: int) -> None:
-        self._crop[side] = val
-        self._left_img, self._right_img = self._process_images()
-
-    def _update_duration(self, val: int) -> None:
-        self._frame_duration = val
-        self._preview_interval = self._frame_duration / 1000.0
+    def _update_duration(self) -> None:
+        self._preview_interval = self._frame_duration.get() / 1000.0
 
     def _export_current(self) -> None:
         assert self._left_img is not None and self._right_img is not None
@@ -392,11 +375,11 @@ class App:
         self._right_img.save(self._output_folder / f"{self._current_file_name}_right.jpg")
 
         gif_path = self._output_folder / f"{self._current_file_name}.gif"
-        create_gif([self._left_img, self._right_img], gif_path, self._frame_duration)
-        
         mp4_path = self._output_folder / f"{self._current_file_name}.mp4"
-        create_mp4([self._left_img, self._right_img], mp4_path, self._frame_duration)
-        
+        duration = self._frame_duration.get()
+        create_gif([self._left_img, self._right_img], gif_path, duration)
+        create_mp4([self._left_img, self._right_img], mp4_path, duration)
+
         print(f"✅ Exported {self._current_file_name}")
         self._load_file(self._current_index + 1)
 
